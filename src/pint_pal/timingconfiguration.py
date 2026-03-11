@@ -146,11 +146,11 @@ class TimingConfiguration:
             Fitter object used if convert_to_indices==True. See below. 
         convert_to_indices : bool, default=False
             Returns JUMPs in the format JUMP1, JUMP2, etc., rather than JUMP -flag flag_value.
-            fitter cannot be None as it needs to reference this object. If it is None, the parameter is taken to be False regardless of how it was set.
+            fitter cannot be None as it needs to reference this object. If it is None and convert_to_indices is True, raise an exception
 
         """
-        if fitter is None:
-            convert_to_indices = False
+        if fitter is None and convert_to_indices:
+            raise ValueError("Fitter object cannot be None, is required with convert_to_indices==True")
 
         retval = None
         if 'free-jumps' in self.config.keys():
