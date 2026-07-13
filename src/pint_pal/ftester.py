@@ -14,10 +14,13 @@ import warnings
 #)
 import pint_pal.PINT_parameters as pparams
 from pint.models.timing_model import Component
+from pint.utils import FTest
 import copy
 import astropy.units as u
 import numpy as np
 import re
+import multiprocessing
+import pint_pal.parallel_fit as par_fit
 
 ALPHA = 0.0027
 
@@ -874,4 +877,128 @@ def check_FB(fitter, alpha=ALPHA, fbmax = 5, NITS=1):
         warnings.warn("No FB parameters in the initial timing model...")
         return False
 
+def parseParallelResults(results):
+    """
+    Checks results of the parallel FTest and exports the parameters to be added/removed
+
+    Input:
+    ----------
+    results [dict] : output of the parallel_fit run
     
+    Returns:
+    ---------
+    add_params [List of params]: Parameters recommended to be added following parallel FTest.
+    remove_params [List of params]: Parameters recommended to be removed following parallel FTest.
+    
+    """
+    alpha_add = ALPHA #0.0027
+    alpha_remove = 1 - ALPHA # 1-0.0027 #0.1336
+    add_params = []
+    remove_params = []
+
+    testResults=results.copy()
+
+    baseCHI2 = results['baseline']['chi2']
+    baseDOF = results['baseline']['dof']
+
+    del testResults['meta']
+    del testResults['baseline']
+    keyList=testResults.keys()
+
+    add_list_pars_FD = []
+    add_list_comps_FD = []
+
+    for i in keyList:
+        ComboPars = testResults[i]['string'].split(':', 1)[1].strip()
+        addRem, parList = ComboPars.split(" ",1)
+
+        params = [getattr(pparams,x) for x in parList.split(" and ")]
+        comps = [getattr(pparams,x+"_Component") for x in parList.split(" and ")]
+        dof = testResults[i]['dof']
+        chi2 = testResults[i]['chi2']
+        pars = []
+        for ii in range(len(params)):
+            pars.append(params[ii].name)
+            
+        if addRem == 'remove':
+            ft = FTest(chi2,dof,baseCHI2,baseDOF)
+            if ft > alpha_remove:
+                remove_params.extend(pars)
+
+        else:
+            ft = FTest(baseCHI2,baseDOF,chi2,dof)
+            if ft <= alpha_add:
+                add_params.extend(pars)
+
+        print(f"{addRem} {parList}\t ft: {ft}")
+    return add_params, remove_params
+
+def checkFLogs(add_params,remove_params,tc):
+    if add_params:
+        add_params = [item.strip() for item in add_params[0].split(',')]
+    else:
+        add_params = []
+
+    if remove_params:
+        remove_params = [item.strip() for item in remove_params[0].split(',')]
+    else:
+        remove_params = []
+
+    if 'FTest' in tc.config:
+        oldFtests = tc.config['FTest']
+
+        # - Compare old results with new to see if duplicates or loop occur
+        for item in sorted(add_params):
+            if item in oldFtests['Remove']:
+                warnings.warn(f'Parameter {item} has already been recommended to be removed.')
+                add_params.remove(item)
+        for item in sorted(remove_params):
+            if item in oldFtests['Add']:
+                warnings.warn(f'Parameter {item} has already been recommended to be added.')
+                remove_params.remove(item)
+
+    else:
+        print("No FTest in config.  Continuing...")
+
+    return sorted(set(add_params)), sorted(set(remove_params))
+
+def runFtest_parallel(fitter,tc,ncpu = 4, results = False):
+    __spec__ = None
+    multiprocessing.freeze_support()
+
+    m = fitter.model
+    t = fitter.toas
+
+    tf = par_fit.TestFitter(model=m,toas=t)
+    results = tf.run(maxiter=20,ncpu=ncpu)
+
+    if results:
+        import json
+        with open(f"results.json", "w") as fo:
+            json.dump(
+                results,
+                fo,
+                indent=4,
+                default=par_fit.astropy_numpy_json_serializer,
+            )
+            
+    ap,rp = parseParallelResults(results)
+
+    if 'FTest' in tc.config:
+        oldFTests = tc.config['FTest']
+        ap = ap + oldFTests['Add']
+        rp = rp + oldFTests['Remove']
+
+    ap_sorted, rp_sorted = checkFLogs(ap,rp,tc)
+
+    configAdd = "[" + ",".join(sorted(set(ap_sorted))) + "]"
+    configRemove = "[" + ",".join(sorted(set(rp_sorted))) + "]"
+
+    print('\n')
+    print('Copy and past below into .yaml file:')
+    print('FTest:\n' \
+        '  Add:',configAdd,'\n' \
+        '  Remove:',configRemove)
+    print('\n')
+
+    return results, ap,rp
