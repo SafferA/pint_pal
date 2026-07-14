@@ -891,8 +891,8 @@ def parseParallelResults(results):
     remove_params [List of params]: Parameters recommended to be removed following parallel FTest.
     
     """
-    alpha_add = ALPHA #0.0027
-    alpha_remove = 1 - ALPHA # 1-0.0027 #0.1336
+    alpha_add = ALPHA
+    alpha_remove = 1 - ALPHA
     add_params = []
     remove_params = []
 
@@ -951,14 +951,16 @@ def checkFLogs(add_params,remove_params,tc):
         for item in sorted(add_params):
             if item in oldFtests['Remove']:
                 warnings.warn(f'Parameter {item} has already been recommended to be removed.')
+                print(f'\nParameter {item} has already been recommended to be removed.')
                 add_params.remove(item)
         for item in sorted(remove_params):
             if item in oldFtests['Add']:
                 warnings.warn(f'Parameter {item} has already been recommended to be added.')
+                print(f'\nParameter {item} has already been recommended to be added.')
                 remove_params.remove(item)
 
     else:
-        print("No FTest in config.  Continuing...")
+        print("\nNo FTest in config.  Continuing...")
 
     return sorted(set(add_params)), sorted(set(remove_params))
 
