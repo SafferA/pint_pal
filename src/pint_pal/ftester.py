@@ -934,16 +934,16 @@ def parseParallelResults(results):
     return add_params, remove_params
 
 def checkFLogs(add_params,remove_params,tc):
-    if add_params:
-        add_params = [item.strip() for item in add_params[0].split(',')]
-    else:
-        add_params = []
-
-    if remove_params:
-        remove_params = [item.strip() for item in remove_params[0].split(',')]
-    else:
-        remove_params = []
-
+#    if add_params:
+#        add_params = [item.strip() for item in add_params[0].split(',')]
+#    else:
+#        add_params = []
+#
+#    if remove_params:
+#        remove_params = [item.strip() for item in remove_params[0].split(',')]
+#    else:
+#        remove_params = []
+#
     if 'FTest' in tc.config:
         oldFtests = tc.config['FTest']
 
