@@ -931,7 +931,7 @@ def parseParallelResults(results):
                 add_params.extend(pars)
 
         print(f"{addRem} {parList}\t ft: {ft}")
-    return add_params, remove_params
+    return sorted(set(add_params)), sorted(set(remove_params))
 
 def checkFLogs(add_params,remove_params,tc):
     if 'FTest' in tc.config:
