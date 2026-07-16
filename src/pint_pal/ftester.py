@@ -934,16 +934,6 @@ def parseParallelResults(results):
     return add_params, remove_params
 
 def checkFLogs(add_params,remove_params,tc):
-#    if add_params:
-#        add_params = [item.strip() for item in add_params[0].split(',')]
-#    else:
-#        add_params = []
-#
-#    if remove_params:
-#        remove_params = [item.strip() for item in remove_params[0].split(',')]
-#    else:
-#        remove_params = []
-#
     if 'FTest' in tc.config:
         oldFtests = tc.config['FTest']
 
@@ -964,7 +954,7 @@ def checkFLogs(add_params,remove_params,tc):
 
     return sorted(set(add_params)), sorted(set(remove_params))
 
-def runFtest_parallel(fitter,tc,ncpu = 4, results = False):
+def runFtest_parallel(fitter,tc,ncpu = 4, results_log = False):
     __spec__ = None
     multiprocessing.freeze_support()
 
@@ -974,7 +964,7 @@ def runFtest_parallel(fitter,tc,ncpu = 4, results = False):
     tf = par_fit.TestFitter(model=m,toas=t)
     results = tf.run(maxiter=20,ncpu=ncpu)
 
-    if results:
+    if results_log:
         import json
         with open(f"results.json", "w") as fo:
             json.dump(
@@ -986,6 +976,19 @@ def runFtest_parallel(fitter,tc,ncpu = 4, results = False):
             
     ap,rp = parseParallelResults(results)
 
+    if ap:
+        add_statement = f"FTests recommend adding the following parameters: {ap}"
+    else:
+        add_statement = "FTests do not recommend adding any parameters."
+    if rp:
+        remove_statement = f"FTests recommend removing the following parameters: {rp}"
+    else:
+        remove_statement = "FTests do not recommend removing any parameters."
+    
+    print('\n')
+    print(add_statement)
+    print(remove_statement)
+    
     if 'FTest' in tc.config:
         oldFTests = tc.config['FTest']
         ap = ap + oldFTests['Add']
