@@ -115,6 +115,105 @@ class TestFitter:
     >>> tf.defaults['extraparnames'].remove('F2')
     >>> tf.setup(maxFD=4)
     # and then re-run the fit
+
+    # Or you can do it like:
+    >>> for p in ["PX", "M2", "F2", "SINI", "A1DOT", "EPS1DOT", "EPS2DOT"]:
+            tf.extraparnames.remove(p)
+    >>> tf.setup()
+
+    # to limit the number of CPUs used:
+    >>> results = tf.run(maxiter=20, ncpu=2)
+
+    # There are errors that come from using the parallel execution in a `main` program.  Avoid those like::
+    ```
+    import multiprocessing
+    import pint.logging
+    import parallel_fit
+
+    if __name__ == "__main__":
+        __spec__ = None
+        multiprocessing.freeze_support()
+
+        pint.logging.setup("INFO")
+        ...
+    ```
+
+    # To run on a `slurm` system where the jobs are distributed to different nodes::
+    ```
+    import multiprocessing
+    from pathlib import Path
+    import pint
+    from pint.models import get_model_and_toas
+    import pint.logging
+    import sys
+    import datetime
+    import json
+    import cfut
+    import concurrent.futures
+    import parallel_fit
+
+    # these determine the node type, outout destination
+    # and also the specific conda environment to load
+    # customize as needed
+    slurm_options = ["#SBATCH --cpus-per-task=1",
+                    "#SBATCH --mem=32g",
+                    "#SBATCH --partition=256g",
+                    "#SBATCH --output=slurm/slurm-%j-%n-%N.out",
+                    "#SBATCH --error=slurm/slurm-%j-%n-%N.err",
+                    "source /sharedapps/LS/cgca/conda/bin/activate pintdev_312"]
+
+    def main():
+        pint.logging.setup("DEBUG")
+
+        log.info(f"Starting at {datetime.datetime.now().isoformat()}")
+        print(f"Starting at {datetime.datetime.now().isoformat()}")
+
+        multiprocessing.freeze_support()
+
+
+        m, t = get_model_and_toas(...)
+        tf = parallel_fit.TestFitter(model=m, toas=t)
+        # use this for SLURM
+        with cfut.SlurmExecutor(debug=True,keep_logs=True,additional_setup_lines=slurm_options) as executor:
+            results=tf.run(maxiter=20, executor=executor, printprogress=False)
+            print(
+                f"Finished at {datetime.datetime.now().isoformat()}"
+                )
+            log.info(
+                f"Finished at {datetime.datetime.now().isoformat()}"
+                )
+
+            with open(..., "w") as fo:
+                json.dump(
+                    results,
+                    fo,
+                    indent=4,
+                    default=parallel_fit.astropy_numpy_json_serializer,
+                )
+
+    if __name__ == "__main__":
+        multiprocessing.freeze_support()
+        main()
+    ```
+    # Note that I found this worked with `cfut==0.4` and not the latest version.
+    # The above command should be saved to a file and the run with `srun` or `sbatch`.  The following worked
+    # but is also probably redundant::
+    ```
+    #!/bin/bash -l
+    #SBATCH --cpus-per-task=1
+    #SBATCH --mem=16g
+    #SBATCH --output=slurm/slurm-%j.out
+    #SBATCH --error=slurm/slurm-%j.err
+
+    # use pintdev environment to use gridding updates
+    conda activate pintdev_312
+
+    echo "Starting"
+    date
+    srun -u python ...
+    echo "Done"
+    date
+    ```
     """
 
     def __init__(
@@ -155,12 +254,17 @@ class TestFitter:
             raise ValueError("Must supply either parfile/timfile or model/toas")
         self.defaults = {}
         self.set_defaults()
+        self.extrapars = None
         # load in the base model first to see which parameters needs to be added vs removed
         self.setup(maxFB=maxFB, maxFD=maxFD)
 
-    def setup(self, maxFB: int = 5, maxFD: int = 5, baseline: bool = True):
+    def setextrapars(
+        self,
+        maxFB: int = 5,
+        maxFD: int = 5,
+    ):
         """
-        Set up the correct combinations of tests based on the loaded timing model and the current lists of parameters
+        Define the extra parameters to test.
 
         If the lists of parameters change (e.g., from an external file) this can be re-run
 
@@ -170,8 +274,6 @@ class TestFitter:
             Maximum FB number to include
         maxFD: int, optional
             Maximum FD number to include
-        baseline: bool, optional
-            Whether or not to include the baseline model (with no parameters added or removed)
 
         """
         self.extraparnames = self.defaults["extraparnames"].copy()
@@ -192,6 +294,25 @@ class TestFitter:
                 self.extraparnames += self.defaults["ddkextraparnames"]
         for j in range(1, maxFD + 1):
             self.extraparnames.append(f"FD{j}")
+
+    def setup(self, maxFB: int = 5, maxFD: int = 5, baseline: bool = True):
+        """
+        Set up the correct combinations of tests based on the loaded timing model and the current lists of parameters
+
+        If the lists of parameters change (e.g., from an external file) this can be re-run
+
+        Parameters
+        ----------
+        maxFB: int, optional
+            Maximum FB number to include
+        maxFD: int, optional
+            Maximum FD number to include
+        baseline: bool, optional
+            Whether or not to include the baseline model (with no parameters added or removed)
+
+        """
+        if self.extrapars is None:
+            self.setextrapars(maxFB=maxFB, maxFD=maxFD)
         default_values = self.defaults["default_values"].copy()
 
         # which actually have to be added to create the maximal model
@@ -207,6 +328,9 @@ class TestFitter:
             )
         else:
             self.m = get_model(self.parfile, **self.extrapars)
+            # rewind to preserve for future reads
+            if isinstance(self.parfile, io.StringIO):
+                self.parfile.seek(0)
             self.t = copy.deepcopy(self.toas)
         self.addpars = []
         self.removepars = []
@@ -217,10 +341,10 @@ class TestFitter:
                 or self.m_base[p].value == 0
             ):
                 self.addpars.append(p)
-                log.debug(f"Testing addition of {p}")
+                log.info(f"Testing addition of {p}")
             else:
                 self.removepars.append(p)
-                log.debug(f"Testing removal of {p}")
+                log.info(f"Testing removal of {p}")
 
         self.f0 = pint.fitter.Fitter.auto(self.t, self.m)
         self.linked_pars_to_add = self.defaults["linked_pars_to_add"].copy()
